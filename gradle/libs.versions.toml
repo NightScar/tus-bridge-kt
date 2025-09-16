@@ -1,0 +1,45 @@
+[versions]
+kotlinVersion = "2.2.20"
+kotlinCorotines = "1.10.2"
+exposedVersion = "0.56.0"
+klogVersion = "7.0.7"
+arrowVersion = "1.2.4"
+springbootVersion = "3.3.5"
+dependencyManagementVersion = "1.1.6"
+caffeineVersion = "3.1.8"
+
+[libraries]
+kotlinStdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlinVersion" }
+coroutinesCore = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinCorotines" }
+coroutinesTest = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinCorotines" }
+klog = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "klogVersion" }
+# exposed
+exposedCore = { module = "org.jetbrains.exposed:exposed-core", version.ref = "exposedVersion" }
+exposedDao = { module = "org.jetbrains.exposed:exposed-dao", version.ref = "exposedVersion" }
+exposedJdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "exposedVersion" }
+exposedJson = { module = "org.jetbrains.exposed:exposed-json", version.ref = "exposedVersion" }
+exposedJaveTime = { module = "org.jetbrains.exposed:exposed-java-time", version.ref = "exposedVersion" }
+hikari = { module = "com.zaxxer:HikariCP", version = "4.0.3" }
+# arrow
+arrow-core = { module = "io.arrow-kt:arrow-core", version.ref = "arrowVersion" }
+arrow-fx-coroutines = { module = "io.arrow-kt:arrow-fx-coroutines", version.ref = "arrowVersion" }
+# caffeine
+caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeineVersion" }
+
+[plugins]
+springboot = { id = "org.springframework.boot", version.ref = "springbootVersion" }
+depend = { id = "io.spring.dependency-management", version.ref = "dependencyManagementVersion" }
+kt = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlinVersion" }
+ktSpring = { id = "org.jetbrains.kotlin.plugin.spring", version.ref = "kotlinVersion" }
+
+[bundles]
+exposedLibs = [
+    "exposedCore",
+    "exposedDao",
+    "exposedJdbc",
+    "exposedJson",
+    "exposedJaveTime",
+    "hikari",
+]
+coroutines = ["kotlinStdlib", "coroutinesCore"]
+arrowLibs = ["arrow-core", "arrow-fx-coroutines"]
