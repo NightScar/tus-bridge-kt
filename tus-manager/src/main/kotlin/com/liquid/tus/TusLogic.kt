@@ -43,6 +43,7 @@ object TusLogic {
         val businessMeta: BusinessMeta,
         val finished: Boolean,
         val createTime: LocalDateTime,
+        val updateTime: LocalDateTime,
     )
 
     interface StorageRepository<T : BusinessMeta> {

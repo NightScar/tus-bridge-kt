@@ -125,6 +125,7 @@ object TusLocalStorageRepository : TusLogic.StorageRepository<TusLocalStorageRep
             offset = 0,
             finished = false,
             createTime = LocalDateTime.now(),
+            updateTime = LocalDateTime.now(),
         )
         infoMap[uploadId] = info
         info
@@ -163,13 +164,14 @@ object TusLocalStorageRepository : TusLogic.StorageRepository<TusLocalStorageRep
                 }
             }
         }
-        var n = uploadInfo.copy(offset=offset)
-        if(offset + dataSize == uploadInfo.totalSize){
+        val n = if(offset + dataSize == uploadInfo.totalSize){
             // finished
             val tmpFile = File(filePathToWrite)
             val finalFile = File(businessMeta.dirPath + "/" + businessMeta.writeFileName)
             tmpFile.renameTo(finalFile)
-            n = n.copy(finished = true)
+            uploadInfo.copy(offset=offset, finished = true, updateTime = LocalDateTime.now())
+        }else{
+            uploadInfo.copy(offset=offset, updateTime = LocalDateTime.now())
         }
         infoMap[uploadId] = n
         n
