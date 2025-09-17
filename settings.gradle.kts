@@ -35,3 +35,5 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "tus-bridge-kt"
+
+include("tus-manager")

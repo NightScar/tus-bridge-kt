@@ -7,6 +7,7 @@ arrowVersion = "1.2.4"
 springbootVersion = "3.3.5"
 dependencyManagementVersion = "1.1.6"
 caffeineVersion = "3.1.8"
+minioVersion = "8.5.17"
 
 [libraries]
 kotlinStdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlinVersion" }
@@ -25,6 +26,8 @@ arrow-core = { module = "io.arrow-kt:arrow-core", version.ref = "arrowVersion" }
 arrow-fx-coroutines = { module = "io.arrow-kt:arrow-fx-coroutines", version.ref = "arrowVersion" }
 # caffeine
 caffeine = { module = "com.github.ben-manes.caffeine:caffeine", version.ref = "caffeineVersion" }
+# minio
+minio = { module = "io.minio:minio", version.ref = "minioVersion" }
 
 [plugins]
 springboot = { id = "org.springframework.boot", version.ref = "springbootVersion" }

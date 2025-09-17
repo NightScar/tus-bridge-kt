@@ -17,7 +17,8 @@ import "@uppy/react/css/style.css";
 function App() {
   const [uppy] = useState(() =>
     new Uppy().use(Tus, {
-      endpoint: "https://tusd.tusdemo.net/files/",
+      endpoint: "/tus/local/upload",
+      chunkSize: 1024 * 1024 * 5,
     })
   );
 
