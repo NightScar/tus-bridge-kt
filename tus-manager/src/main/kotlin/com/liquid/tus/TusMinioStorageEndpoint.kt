@@ -6,56 +6,118 @@ import arrow.core.raise.ensure
 import arrow.core.raise.ensureNotNull
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.google.common.collect.HashMultimap
 import com.liquid.tus.TusLogic.BusinessMeta
-import io.minio.BucketExistsArgs
-import io.minio.CreateMultipartUploadResponse
-import io.minio.MinioAsyncClient
-import io.minio.PutObjectArgs
-import io.minio.UploadPartResponse
+import io.minio.*
 import io.minio.messages.Part
+import jakarta.servlet.http.HttpServletRequest
 import org.jetbrains.exposed.dao.id.LongIdTable
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.exists
-import org.jetbrains.exposed.sql.insertAndGetId
+import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
 import org.jetbrains.exposed.sql.json.jsonb
-import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
-import org.jetbrains.exposed.sql.update
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestMethod
 import org.springframework.web.bind.annotation.RestController
-import java.io.File
 import java.io.InputStream
-import java.io.RandomAccessFile
 import java.time.LocalDateTime
-import kotlin.ByteArray
-import kotlin.Int
-import kotlin.Long
-import kotlin.String
-import kotlin.TODO
-import kotlin.Unit
-import kotlin.also
-import kotlin.collections.Map
-import kotlin.collections.firstOrNull
-import kotlin.collections.map
-import kotlin.collections.plus
-import kotlin.plus
-import kotlin.sequences.plus
-import kotlin.text.get
-import kotlin.text.plus
 
 @RestController
 @RequestMapping("/tus/minio")
 class TusMinioStorageEndpoint(
-    private val minioClient: MinioAsyncClient,
+    private val minioConfigProperties: MinioConfigProperties,
+    private val exposedDatabaseConfig: ExposedDatabaseConfig,
 ) {
 
+    private val minioAsyncClient = MinioAsyncClient.builder()
+        .endpoint(minioConfigProperties.minioEndpoint)
+        .credentials(
+            minioConfigProperties.minioAccessKey,
+            minioConfigProperties.minioSecretKey
+        )
+        .build()
+    private val repository = TusMinioStorageRepository(minioAsyncClient, exposedDatabaseConfig.defaultDb)
+
+
+    companion object {
+        const val MAX_LENGTH: Long = 1024 * 1024 * 200
+    }
+
+    @RequestMapping(value = ["/upload"], method = [RequestMethod.OPTIONS])
+    fun options(): ResponseEntity<*> {
+        val r = TusLogic.handleOptions(MAX_LENGTH).blockCall()
+        return ResponseEntity.status(r.status).also {
+            r.headers.forEach { (k, v) -> it.header(k, v) }
+        }.build<Unit>()
+    }
+
+    @RequestMapping(value = ["/upload/{uploadId}"], method = [RequestMethod.HEAD])
+    fun head(
+        @PathVariable uploadId: String,
+        @RequestHeader headers: Map<String, String>,
+    ): ResponseEntity<*> {
+        val r = TusLogic.handleHead(
+            uploadId = uploadId,
+            lowCaseRequestHeaders = headers,
+            storageRepository = repository,
+        ).blockCall()
+        return ResponseEntity.status(r.status).also {
+            r.headers.forEach { (k, v) -> it.header(k, v) }
+        }.body(r.body)
+    }
+
+    @PostMapping(value = ["/upload"])
+    fun post(
+        @RequestHeader headers: Map<String, String>,
+    ): ResponseEntity<*> {
+        val r = TusLogic.handleCreation(
+            lowCaseRequestHeaders = headers,
+            storageRepository = repository,
+            maxLength = MAX_LENGTH,
+            locationGen = { "/tus/minio/upload$it" },
+            businessMetaChecker = { (uploadId, uploadMeta) ->
+                effect {
+                    val filename = uploadMeta["filename"]!!
+                    val t = filename.substringAfterLast(".")
+                    val pre = filename.substringBeforeLast(".")
+                    // do your business
+                    TusMinioStorageRepository.MinioStorageBusinessMeta(
+                        bucket = minioConfigProperties.minioBucket,
+                        objectName = "${pre}_${uploadId.subSequence(0, 4)}.${t}",
+                    )
+                }
+            }
+        ).blockCall()
+        return ResponseEntity.status(r.status).also {
+            r.headers.forEach { (k, v) -> it.header(k, v) }
+        }.body(r.body)
+    }
+
+    @PatchMapping(value = ["/upload/{uploadId}"])
+    fun patch(
+        @PathVariable uploadId: String,
+        @RequestHeader headers: Map<String, String>,
+        request: HttpServletRequest,
+    ): ResponseEntity<*> {
+        val r = TusLogic.handlePatch(
+            uploadId = uploadId,
+            lowCaseRequestHeaders = headers,
+            fileInputStream = request.inputStream,
+            storageRepository = repository,
+        ).blockCall()
+        return ResponseEntity.status(r.status).also {
+            r.headers.forEach { (k, v) -> it.header(k, v) }
+        }.body(r.body)
+    }
 
 }
-
 
 
 class TusMinioStorageRepository(
@@ -63,13 +125,13 @@ class TusMinioStorageRepository(
     private val db: Database,
 ) : TusLogic.StorageRepository<TusMinioStorageRepository.MinioStorageBusinessMeta> {
 
-    companion object{
+    companion object {
         val om = jacksonObjectMapper()
     }
 
     init {
         transaction(db) {
-            if(!MinioUploadInfoTable.exists()){
+            if (!MinioUploadInfoTable.exists()) {
                 SchemaUtils.create(MinioUploadInfoTable)
             }
         }
@@ -83,13 +145,13 @@ class TusMinioStorageRepository(
         val offset = long("offset").default(0L)
         val uploadMeta = jsonb(
             "upload_meta",
-            serialize = {om.writeValueAsString(it)},
-            deserialize = {om.readValue<Map<String, String?>>(it)}
+            serialize = { om.writeValueAsString(it) },
+            deserialize = { om.readValue<Map<String, String?>>(it) }
         )
         val businessMeta = jsonb(
             "business_meta",
-            serialize = {om.writeValueAsString(it)},
-            deserialize = {om.readValue<MinioStorageBusinessMeta>(it)}
+            serialize = { om.writeValueAsString(it) },
+            deserialize = { om.readValue<MinioStorageBusinessMeta>(it) }
         )
         val finished = bool("finished").default(false)
         val createTime = datetime("create_time").defaultExpression(CurrentDateTime)
@@ -100,29 +162,41 @@ class TusMinioStorageRepository(
     data class MinioStorageBusinessMeta(
         val bucket: String,
         val objectName: String,
-        val minioUploadId: String? = null,
-        val parts: List<Part> = emptyList(),
+        val multiPartInfo: MultiPartInfo? = null,
     ) : BusinessMeta
+
+    data class MultiPartInfo(
+        val minioUploadId: String,
+        val partSize: Long,
+        val partCount: Int,
+        val parts: List<MinioPart> = emptyList(),
+    )
+    data class MinioPart(
+        val partNumber: Int,
+        val etag: String,
+    )
 
     override fun createUploadInfo(
         uploadId: String,
         totalSize: Long,
         uploadMeta: Map<String, String?>,
         businessMeta: MinioStorageBusinessMeta,
-    ): Effect<TusError, TusLogic.UploadInfo> = effect{
+    ): Effect<TusError, TusLogic.UploadInfo> = effect {
 
         // check bucket
-        ensure(minioClient.bucketExists(
-            BucketExistsArgs.builder().bucket(businessMeta.bucket).build()
-        ).get()){
+        ensure(
+            minioClient.bucketExists(
+                BucketExistsArgs.builder().bucket(businessMeta.bucket).build()
+            ).get()
+        ) {
             TusError.TusBusinessError("bucket not exist")
         }
 
         transaction(db) {
-            val existing = MinioUploadInfoTable.selectAll().where{
+            val existing = MinioUploadInfoTable.selectAll().where {
                 MinioUploadInfoTable.uploadId eq uploadId
             }.firstOrNull()
-            ensure(existing == null){
+            ensure(existing == null) {
                 TusError.TusBusinessError("upload id existed")
             }
         }
@@ -134,9 +208,9 @@ class TusMinioStorageRepository(
                 it[MinioUploadInfoTable.uploadMeta] = uploadMeta
                 it[MinioUploadInfoTable.businessMeta] = businessMeta
             }
-            MinioUploadInfoTable.selectAll().where{
+            MinioUploadInfoTable.selectAll().where {
                 MinioUploadInfoTable.uploadId eq uploadId
-            }.map{
+            }.map {
                 TusLogic.UploadInfo(
                     id = it[MinioUploadInfoTable.id].value,
                     uploadId = it[MinioUploadInfoTable.uploadId],
@@ -150,16 +224,16 @@ class TusMinioStorageRepository(
                 )
             }.firstOrNull()
         }
-        ensureNotNull(info){
+        ensureNotNull(info) {
             TusError.TusBusinessError("create upload info failed")
         }
     }
 
-    override fun getUploadInfo(uploadId: String): Effect<TusError, TusLogic.UploadInfo?> = effect{
+    override fun getUploadInfo(uploadId: String): Effect<TusError, TusLogic.UploadInfo?> = effect {
         transaction(db) {
-            MinioUploadInfoTable.selectAll().where{
+            MinioUploadInfoTable.selectAll().where {
                 MinioUploadInfoTable.uploadId eq uploadId
-            }.map{
+            }.map {
                 TusLogic.UploadInfo(
                     id = it[MinioUploadInfoTable.id].value,
                     uploadId = it[MinioUploadInfoTable.uploadId],
@@ -175,28 +249,33 @@ class TusMinioStorageRepository(
         }
     }
 
+    @Suppress("LongMethod")
     override fun writeDataAndUpdateOffset(
         uploadId: String,
         offset: Long,
         dataSize: Long,
         inputStream: InputStream
-    ): Effect<TusError, TusLogic.UploadInfo> = effect{
-        val uploadInfo = ensureNotNull(getUploadInfo(uploadId).bind()){
+    ): Effect<TusError, TusLogic.UploadInfo> = effect {
+        val uploadInfo = ensureNotNull(getUploadInfo(uploadId).bind()) {
             TusError.UploadNotFound(uploadId)
         }
         val businessMeta = uploadInfo.businessMeta
-        ensure(businessMeta is MinioStorageBusinessMeta){
+        val filename = uploadInfo.uploadMeta["filename"]!!
+        val contentType = filename.substringAfterLast(".", "else").let {
+            MinioContentType.contentType(it)
+        }
+        ensure(businessMeta is MinioStorageBusinessMeta) {
             TusError.TusBusinessError("mis match business meta type")
         }
 
-        if(offset == 0L && dataSize == uploadInfo.totalSize){
+        if (offset == 0L && dataSize == uploadInfo.totalSize) {
             // 第一次上传，文件大小与totalSize一致，直接写入
             minioClient.putObject(
                 PutObjectArgs.builder()
                     .bucket(businessMeta.bucket)
                     .`object`(businessMeta.objectName)
                     .stream(inputStream, dataSize, -1)
-                    .contentType("") // todo: content type
+                    .contentType(contentType)
                     .build()
             ).get()
             transaction(db) {
@@ -209,13 +288,14 @@ class TusMinioStorageRepository(
                     it[MinioUploadInfoTable.updateTime] = LocalDateTime.now()
                 }
             }
-            return@effect ensureNotNull(getUploadInfo(uploadId).bind()){
+            return@effect ensureNotNull(getUploadInfo(uploadId).bind()) {
                 TusError.UploadNotFound(uploadId)
             }
         }
-        val minioUploadId : String = if(offset == 0L){
+        val multiPartInfo: MultiPartInfo = if (offset == 0L) {
             // 第一次上传，offset为0，并且是分片的
             // 此时, 分片大小 = dataSize
+            val partCount = (uploadInfo.totalSize + dataSize - 1) / dataSize
 
             // 创建分片上传的 minio upload id
             val createMultipartUploadResponse: CreateMultipartUploadResponse =
@@ -223,36 +303,108 @@ class TusMinioStorageRepository(
                     businessMeta.bucket,
                     null,
                     businessMeta.objectName,
-                    null,
+                    HashMultimap.create<String, String>().apply {
+                        put("Content-Type", contentType)
+                    },
                     null
                 ).get()
-            createMultipartUploadResponse.result().uploadId()
-        }else{
+            val minioUploadId = createMultipartUploadResponse.result().uploadId()
+            MultiPartInfo(
+                minioUploadId = minioUploadId,
+                partSize = dataSize,
+                partCount = partCount.toInt(),
+            )
+        } else {
             // 非第一个分片
-            ensureNotNull(businessMeta.minioUploadId){
-                TusError.TusBusinessError("minio upload id is null")
+            ensureNotNull(businessMeta.multiPartInfo) {
+                TusError.TusBusinessError("minio multiPartInfo is null")
             }
         }
+        val partNumber = (offset / multiPartInfo.partSize).toInt() + 1
 
         val uploadPartResponse: UploadPartResponse = minioClient.uploadPartAsync(
+            businessMeta.bucket,
+            null,
+            businessMeta.objectName,
+            inputStream,
+            dataSize,
+            multiPartInfo.minioUploadId,
+            partNumber,
+            null,
+            null
+        ).get()
+        val eTag = uploadPartResponse.etag()
+        val part = MinioPart(partNumber, eTag)
+
+        val newMultiPartInfo = multiPartInfo.copy(
+            parts = multiPartInfo.parts + part
+        )
+
+        if (offset + dataSize == uploadInfo.totalSize) {
+            // finished
+
+            minioClient.completeMultipartUploadAsync(
                 businessMeta.bucket,
                 null,
                 businessMeta.objectName,
-                inputStream,
-                dataSize,
-                minioUploadId,
-                1123,
+                newMultiPartInfo.minioUploadId,
+                newMultiPartInfo.parts.map{Part(it.partNumber, it.etag)}.toTypedArray(),
                 null,
                 null
             ).get()
-        val eTag = uploadPartResponse.etag()
 
-        if(offset + dataSize == uploadInfo.totalSize){
-            // finished
+            transaction(db) {
+                MinioUploadInfoTable.update({
+                    (MinioUploadInfoTable.uploadId eq uploadId) and
+                            (MinioUploadInfoTable.offset eq offset)
+                }) {
+                    it[MinioUploadInfoTable.offset] = offset + dataSize
+                    it[MinioUploadInfoTable.finished] = true
+                    it[MinioUploadInfoTable.businessMeta] = businessMeta.copy(
+                        multiPartInfo = newMultiPartInfo
+                    )
+                    it[MinioUploadInfoTable.updateTime] = LocalDateTime.now()
+                }
+            }
+        } else {
+            transaction(db) {
+                MinioUploadInfoTable.update({
+                    (MinioUploadInfoTable.uploadId eq uploadId) and
+                            (MinioUploadInfoTable.offset eq offset)
+                }) {
+                    it[MinioUploadInfoTable.offset] = offset + dataSize
+                    it[MinioUploadInfoTable.businessMeta] = businessMeta.copy(
+                        multiPartInfo = newMultiPartInfo
+                    )
+                    it[MinioUploadInfoTable.updateTime] = LocalDateTime.now()
+                }
+            }
         }
+        getUploadInfo(uploadId).bind()!!
     }
 
-    override fun deleteUploadInfo(uploadId: String): Effect<TusError, Unit> {
-        TODO("Not yet implemented")
+    override fun deleteUploadInfo(uploadId: String): Effect<TusError, Unit> = effect {
+        val uploadInfo = ensureNotNull(getUploadInfo(uploadId).bind()) {
+            TusError.UploadNotFound(uploadId)
+        }
+        val businessMeta = uploadInfo.businessMeta
+        ensure(businessMeta is MinioStorageBusinessMeta) {
+            TusError.TusBusinessError("mis match business meta type")
+        }
+        if (businessMeta.multiPartInfo != null && !uploadInfo.finished) {
+            minioClient.abortMultipartUploadAsync(
+                businessMeta.bucket,
+                null,
+                businessMeta.objectName,
+                businessMeta.multiPartInfo.minioUploadId,
+                null,
+                null
+            ).get()
+        }
+        transaction(db) {
+            MinioUploadInfoTable.deleteWhere {
+                (MinioUploadInfoTable.uploadId eq uploadId)
+            }
+        }
     }
 }

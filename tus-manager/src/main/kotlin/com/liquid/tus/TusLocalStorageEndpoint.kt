@@ -5,7 +5,6 @@ import arrow.core.raise.effect
 import arrow.core.raise.ensure
 import arrow.core.raise.ensureNotNull
 import jakarta.servlet.http.HttpServletRequest
-import okio.Buffer
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -20,6 +19,8 @@ import java.io.RandomAccessFile
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 
+
+@Suppress("unused")
 @RestController
 @RequestMapping("/tus/local")
 class TusLocalStorageEndpoint {

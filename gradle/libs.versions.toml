@@ -8,6 +8,7 @@ springbootVersion = "3.3.5"
 dependencyManagementVersion = "1.1.6"
 caffeineVersion = "3.1.8"
 minioVersion = "8.5.17"
+pgVersion = "42.7.3"
 
 [libraries]
 kotlinStdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlinVersion" }
@@ -21,6 +22,7 @@ exposedJdbc = { module = "org.jetbrains.exposed:exposed-jdbc", version.ref = "ex
 exposedJson = { module = "org.jetbrains.exposed:exposed-json", version.ref = "exposedVersion" }
 exposedJaveTime = { module = "org.jetbrains.exposed:exposed-java-time", version.ref = "exposedVersion" }
 hikari = { module = "com.zaxxer:HikariCP", version = "4.0.3" }
+pg = { module = "org.postgresql:postgresql", version.ref = "pgVersion" }
 # arrow
 arrow-core = { module = "io.arrow-kt:arrow-core", version.ref = "arrowVersion" }
 arrow-fx-coroutines = { module = "io.arrow-kt:arrow-fx-coroutines", version.ref = "arrowVersion" }
@@ -43,6 +45,7 @@ exposedLibs = [
     "exposedJson",
     "exposedJaveTime",
     "hikari",
+    "pg",
 ]
 coroutines = ["kotlinStdlib", "coroutinesCore"]
 arrowLibs = ["arrow-core", "arrow-fx-coroutines"]

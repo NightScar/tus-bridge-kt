@@ -5,11 +5,14 @@ import arrow.core.raise.effect
 import arrow.core.raise.ensure
 import arrow.core.raise.ensureNotNull
 import arrow.core.raise.fold
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.runBlocking
 import java.io.InputStream
 import java.time.LocalDateTime
 import java.util.UUID
 import kotlin.io.encoding.Base64
+
+private val log = KotlinLogging.logger {  }
 
 object TusLogic {
 
@@ -287,6 +290,7 @@ sealed class TusError {
         val headerName : String,
     ) : TusError() {
         override fun toResponse() : TusResponse {
+            log.error { "Missing request header: $headerName" }
             return TusResponse(
                 status = 400,
                 headers = emptyMap(),
@@ -300,6 +304,7 @@ sealed class TusError {
         val headerValue : String,
     ) : TusError() {
         override fun toResponse() : TusResponse {
+            log.error { "Invalid request header: $headerName=$headerValue" }
             return TusResponse(
                 status = 400,
                 headers = emptyMap(),
@@ -313,6 +318,7 @@ sealed class TusError {
         val fileLength: Long,
     ) : TusError() {
         override fun toResponse() : TusResponse {
+            log.error { "File size exceeded: max=$maxLength, file=$fileLength" }
             return TusResponse(
                 status = 413,
                 headers = emptyMap(),
@@ -325,6 +331,7 @@ sealed class TusError {
         val metaDataName : String,
     ) : TusError() {
         override fun toResponse() : TusResponse {
+            log.error { "Missing upload metadata: $metaDataName" }
             return TusResponse(
                 status = 400,
                 headers = emptyMap(),
@@ -337,6 +344,7 @@ sealed class TusError {
         val message : String,
     ) : TusError() {
         override fun toResponse() : TusResponse {
+            log.error { "Tus business error: $message" }
             return TusResponse(
                 status = 400,
                 headers = emptyMap(),
@@ -349,6 +357,7 @@ sealed class TusError {
         val uploadId : String,
     ) : TusError() {
         override fun toResponse() : TusResponse {
+            log.error { "Upload not found: $uploadId" }
             return TusResponse(
                 status = 404,
                 headers = emptyMap(),
